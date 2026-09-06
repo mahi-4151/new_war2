@@ -28,7 +28,9 @@ export const COMBAT = {
   dodge: { cooldown: 1.6, distance: 1.7, invulnerable: 0.55 },
   special: { cooldown: 9, damage: 30, range: 3.2, charge: 3 }, // charge = hits needed to unlock
   /** Hero credits awarded per level won; persisted in the browser wallet. */
-  reward: { coins: 500, pearls: 100 },
+  reward: { coins: 500, pearls: 50 },
+  /** After losing all lives the player is locked out for this long (real time). */
+  lockoutMs: 5 * 60 * 60 * 1000, // 5 hours
   points: { hit: 25, crit: 60, parry: 40, dodge: 15, special: 120, kill: 1000, lifeBonus: 300, timeBonus: 500 },
   moveSpeed: 2.0,
   backSpeed: 1.5,
@@ -62,15 +64,15 @@ export const WEAPONS = [
     label: 'Sword',
     file: 'weapons/sword.glb',
     hand: 'right',
-    align: 'grip',
+    align: 'forearm', // follow the forearm line so the blade hangs naturally, not sideways
     twoHanded: true,
     length: 1.15,
-    grip: 0.14,
+    grip: 0.2,
     rotation: [0, 0, 0],
     offset: [0, 0, 0],
-    damage: 13,
+    damage: 16,
     range: 2.45,
-    speed: 1,
+    speed: 1.05,
     clip: 'attack',
     impactAt: 0.42,
     trail: '#ffe9b0',
@@ -174,5 +176,22 @@ export const ASSETS = {
     temple: 'scenery/temple.glb',
   },
 };
+
+/**
+ * The nine Kingdom Path levels. Every one of them runs the same 3D war; only the
+ * enemy's name/title and a gentle difficulty multiplier change. Each level opens
+ * only after the previous one is won (see the map code).
+ */
+export const LEVELS = [
+  { name: 'Spectral Warrior', title: 'Battle of the First Fortress', difficulty: 1.0 },
+  { name: 'Tiger Guardian', title: 'Cross the Dark Forest', difficulty: 1.06 },
+  { name: 'Grim Warlord', title: 'Protect the Pandya Village', difficulty: 1.12 },
+  { name: 'Fortress General', title: 'Capture the Enemy Fortress', difficulty: 1.18 },
+  { name: 'Temple Guardian', title: 'Find the Sacred Crown', difficulty: 1.24 },
+  { name: 'Elephant Commander', title: 'Defeat the Elephant Commander', difficulty: 1.3 },
+  { name: 'Warlord of the North', title: 'Rescue the Captured Warriors', difficulty: 1.36 },
+  { name: 'Enemy King', title: 'Win the Great Battlefield', difficulty: 1.44 },
+  { name: 'Dark Overlord', title: 'Final Battle — Protect the Empire', difficulty: 1.52 },
+];
 
 export const BASE_URL = 'assets/';

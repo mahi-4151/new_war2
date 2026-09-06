@@ -50,7 +50,13 @@ export class Hud {
       rewardPearls: $('[data-reward-pearls]'),
       walletTotalCoins: $('[data-wallet-total-coins]'),
       walletTotalPearls: $('[data-wallet-total-pearls]'),
-      store: $('[data-store]'),
+      map: $('[data-map]'),
+      level: $('[data-level]'),
+      startLevel: $('[data-start-level]'),
+      startKicker: $('[data-start-kicker]'),
+      locked: $('[data-locked]'),
+      lockedCount: $('[data-locked-count]'),
+      lockedMap: $('[data-locked-map]'),
       bars: {
         player: { fill: $('[data-hp-fill="player"]'), lag: $('[data-hp-lag="player"]'), text: $('[data-hp-text="player"]'), bar: $('.bar--player'), portrait: $('.portrait--player') },
         enemy: { fill: $('[data-hp-fill="enemy"]'), lag: $('[data-hp-lag="enemy"]'), text: $('[data-hp-text="enemy"]'), bar: $('.bar--enemy'), portrait: $('.portrait--enemy') },
@@ -99,21 +105,21 @@ export class Hud {
     this.el.hud.hidden = false;
   }
 
-  showResult({ win, coins, gems, lives, points = 0, bonus = null, reward = null, wallet = null }) {
+  showResult({ win, coins, gems, lives, points = 0, bonus = null, reward = null, wallet = null, level = 1, lastLevel = false }) {
     const screen = this.el.result;
     screen.hidden = false;
     screen.classList.toggle('is-win', win);
     screen.classList.remove('is-fading');
     this.el.resultTitle.textContent = win ? 'Level Clear!' : 'Game Over';
     this.el.resultSub.textContent = win
-      ? 'The Spectral Warrior is banished. Madurai holds its throne.'
+      ? `Level ${level} — ${this.levelTitle ?? 'The warlord'} is defeated. Madurai holds its throne.`
       : 'The throne of Madurai falls silent. Rise and fight again.';
     this.#countUp(this.el.resultCoins, coins);
     this.#countUp(this.el.resultGems, gems);
     this.el.resultLives.textContent = String(lives);
     this.#countUp(this.el.resultPoints, points);
 
-    // Level Clear shows the bonus breakdown + NEXT LEVEL; Game Over shows TRY AGAIN + STORE.
+    // Level Clear shows the bonus breakdown + CONTINUE; Game Over shows REPLAY.
     this.el.bonus.hidden = !win || !bonus;
     if (bonus) {
       this.el.bonusTime.textContent = `+${bonus.time} PTS`;
@@ -127,9 +133,53 @@ export class Hud {
       this.#countUp(this.el.walletTotalCoins, wallet.coins);
       this.#countUp(this.el.walletTotalPearls, wallet.pearls);
     }
+
+    // Win → CONTINUE + BACK TO MAP; Lose → REPLAY + BACK TO MAP.
     this.el.again.hidden = !win;
     this.el.retry.hidden = win;
-    this.el.store.hidden = win;
+    this.el.map.hidden = false;
+    this.el.again.textContent = win ? (lastLevel ? 'Return to Map' : 'Continue') : '';
+  }
+
+  /** Shown on the start screen and the result card: which Kingdom Path level. */
+  setLevel(level, title) {
+    this.levelTitle = title;
+    if (this.el.startLevel) this.el.startLevel.textContent = `Level ${level}`;
+    if (this.el.startKicker) this.el.startKicker.textContent = title;
+    if (this.el.level) this.el.level.textContent = `Level ${level}`;
+    if (this.el.again) this.el.again.dataset.lastLevel = String(level >= 9);
+  }
+
+  /** Shows the real-time lockout overlay after using every life. */
+  showLocked(remainingMs) {
+    if (this.el.locked) {
+      this.el.locked.hidden = false;
+      this.#tickLocked(remainingMs);
+    }
+  }
+
+  hideLocked() {
+    if (this.el.locked) this.el.locked.hidden = true;
+  }
+
+  #tickLocked(remainingMs) {
+    if (!this.el.locked || !this.el.lockedCount) return;
+    clearTimeout(this._lockTimer);
+    const render = () => {
+      const remaining = Math.max(0, remainingMs - (performance.now() - this._lockStartedAt));
+      if (remaining <= 0) {
+        this.hideLocked();
+        return;
+      }
+      const total = Math.ceil(remaining / 1000);
+      const h = Math.floor(total / 3600);
+      const m = Math.floor((total % 3600) / 60);
+      const s = total % 60;
+      this.el.lockedCount.textContent = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+      this._lockTimer = setTimeout(render, 1000);
+    };
+    this._lockStartedAt = performance.now();
+    render();
   }
 
   setPoints(points) {

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-import { ARENA, ASSETS, CAMERA, COMBAT, WEAPONS } from '../config.js';
+import { ARENA, ASSETS, CAMERA, COMBAT, LEVELS, WEAPONS } from '../config.js';
 import { AssetLoader } from '../engine/assets.js';
 import { Sfx } from '../engine/sfx.js';
 import { Arena } from '../world/arena.js';
@@ -58,6 +58,11 @@ export class Game {
     this.kills = 0;
     this.wallet = Game.loadWallet();
 
+    // Which Kingdom Path level are we fighting? Comes from `?level=N`.
+    const levelParam = parseInt(new URLSearchParams(location.search).get('level'), 10);
+    this.level = Number.isFinite(levelParam) ? Math.min(9, Math.max(1, levelParam)) : 1;
+    this.levelDef = LEVELS[this.level - 1] ?? LEVELS[0];
+
     window.addEventListener('resize', () => this.resize());
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) this.clock.getDelta();
@@ -67,6 +72,8 @@ export class Game {
   /* ---------------------------------------------------------- hero wallet */
 
   static WALLET_KEY = 'pandya.wallet';
+  static LOCKOUT_KEY = 'pandya.lockoutUntil';
+  static UNLOCK_KEY = 'pandyaUnlockedLevel';
 
   static loadWallet() {
     try {
@@ -78,7 +85,58 @@ export class Game {
     return { coins: 0, pearls: 0 };
   }
 
-  /** Credits the hero for a level won and persists the wallet. */
+  /** Real-time lockout used after using all lives. Returns remaining ms (0 = free). */
+  static getLockoutRemaining() {
+    let until = NaN;
+    try {
+      until = Number(localStorage.getItem(Game.LOCKOUT_KEY));
+    } catch {
+      /* storage unavailable */
+    }
+    if (!Number.isFinite(until)) return 0;
+    return Math.max(0, until - Date.now());
+  }
+
+  static isLocked() {
+    return Game.getLockoutRemaining() > 0;
+  }
+
+  /** Starts a fresh 5-hour lockout (called when the player uses every life). */
+  static beginLockout() {
+    try {
+      localStorage.setItem(Game.LOCKOUT_KEY, String(Date.now() + COMBAT.lockoutMs));
+    } catch {
+      /* storage unavailable — no lockout */
+    }
+  }
+
+  static clearLockout() {
+    try {
+      localStorage.removeItem(Game.LOCKOUT_KEY);
+    } catch {
+      /* storage unavailable */
+    }
+  }
+
+  static loadUnlocked() {
+    try {
+      const value = Number(localStorage.getItem(Game.UNLOCK_KEY));
+      if (Number.isFinite(value)) return Math.min(9, Math.max(1, value));
+    } catch {
+      /* storage unavailable */
+    }
+    return 1;
+  }
+
+  static saveUnlocked(level) {
+    try {
+      localStorage.setItem(Game.UNLOCK_KEY, String(Math.min(9, Math.max(1, level))));
+    } catch {
+      /* storage unavailable */
+    }
+  }
+
+  /** Credits the hero for a level won, persists the wallet and unlocks the next. */
   rewardHero() {
     this.wallet.coins += COMBAT.reward.coins;
     this.wallet.pearls += COMBAT.reward.pearls;
@@ -88,12 +146,24 @@ export class Game {
       /* private mode etc. — wallet still lives for this session */
     }
     this.hud.setWallet(this.wallet);
-    return { ...COMBAT.reward };
+
+    // Unlock the next Kingdom Path level (a level only opens after the last win).
+    const nextUnlocked = Math.max(Game.loadUnlocked(), Math.min(9, this.level + 1));
+    Game.saveUnlocked(nextUnlocked);
+
+    return { ...COMBAT.reward, unlocked: nextUnlocked };
   }
 
   /* ------------------------------------------------------------------ boot */
 
   async boot() {
+    // A level only opens after the previous one is won. Direct links to a
+    // locked level are sent back to the Kingdom Path map.
+    if (this.level > Game.loadUnlocked()) {
+      window.location.href = 'map.html';
+      return;
+    }
+
     this.hud.setProgress(0.08, 'Summoning the kings…');
     const rack = new WeaponRack(this.loader);
     const [heroGltf, villainGltf] = await Promise.all([
@@ -113,16 +183,24 @@ export class Game {
       startX: ARENA.playerStart,
       maxHp: COMBAT.maxHp,
     });
+    // Each Kingdom Path level gets a tougher (but winnable) enemy.
+    this.enemyMaxHp = Math.round(COMBAT.maxHp * (0.9 + (this.level - 1) * 0.05));
     this.enemy = new Fighter({
       gltf: villainGltf,
       rack,
       side: 'enemy',
       height: ARENA.fighterHeight * 1.04,
       startX: ARENA.enemyStart,
-      maxHp: COMBAT.maxHp,
+      maxHp: this.enemyMaxHp,
     });
+    this.enemy.hp = this.enemyMaxHp;
     this.enemy.setWeaponById('sword');
     this.arena.scene.add(this.player.root, this.enemy.root);
+
+    // Announce the level's enemy name/title on the enemy card.
+    const enemyName = document.querySelector('[data-enemy-name]');
+    if (enemyName) enemyName.textContent = this.levelDef.name;
+    this.hud.setLevel(this.level, this.levelDef.title);
 
     this.brain = new EnemyBrain({
       self: this.enemy,
@@ -152,11 +230,14 @@ export class Game {
     this.controls.setEnabled(false);
 
     await this.arena.buildSkyline();
+    await this.arena.buildBackdrop();
     this.hud.setProgress(1, 'Ready');
     this.hud.setWeapon(this.player.weapon);
     this.hud.setLives(this.lives);
     this.hud.setCooldown('special', 1);
     this.hud.setWallet(this.wallet);
+    this.hud.setHp('player', this.player.hp, this.player.maxHp);
+    this.hud.setHp('enemy', this.enemy.hp, this.enemy.maxHp);
     this.resize();
 
     // Render one frame behind the veil so the first visible frame is warm.
@@ -169,11 +250,41 @@ export class Game {
     this.renderer.setAnimationLoop(() => this.frame());
 
     this.hud.el.play.addEventListener('click', () => this.startMatch());
-    this.hud.el.again.addEventListener('click', () => this.restart());
-    this.hud.el.retry.addEventListener('click', () => this.restart());
-    this.hud.el.store.addEventListener('click', () => this.hud.announce('Store opens soon'));
+    this.hud.el.again.addEventListener('click', () => this.continueLevel());
+    this.hud.el.retry.addEventListener('click', () => this.replay());
+    this.hud.el.map.addEventListener('click', () => this.backToMap());
+    if (this.hud.el.lockedMap) this.hud.el.lockedMap.addEventListener('click', () => this.backToMap());
     this.hud.el.pause.addEventListener('click', () => this.togglePause());
     this.hud.el.resume.addEventListener('click', () => this.togglePause(false));
+
+    // Honour the 5-hour lockout: if every life was spent, block the duel.
+    if (Game.isLocked()) {
+      this.hud.showLocked(Game.getLockoutRemaining());
+      this.state = 'over';
+    }
+  }
+
+  /* ------------------------------------------------------- level navigation */
+
+  backToMap() {
+    window.location.href = 'map.html';
+  }
+
+  continueLevel() {
+    if (this.level < 9) {
+      window.location.href = `index.html?level=${this.level + 1}`;
+    } else {
+      // Final level cleared — head back to the kingdom map.
+      window.location.href = 'map.html';
+    }
+  }
+
+  replay() {
+    if (Game.isLocked()) {
+      this.hud.showLocked(Game.getLockoutRemaining());
+      return;
+    }
+    this.restart();
   }
 
   resize() {
@@ -187,6 +298,10 @@ export class Game {
   /* ----------------------------------------------------------- match flow */
 
   async startMatch() {
+    if (Game.isLocked()) {
+      this.hud.showLocked(Game.getLockoutRemaining());
+      return;
+    }
     this.sfx.unlock();
     await this.hud.hideStart();
     this.hud.showHud();
@@ -554,7 +669,18 @@ export class Game {
       this.hud.announce('Level Clear!');
       this.sfx.win();
       setTimeout(
-        () => this.hud.showResult({ win: true, coins: this.loot.coins, gems: this.loot.gems, lives: this.lives, points: this.points, bonus, reward, wallet: this.wallet }),
+        () => this.hud.showResult({
+          win: true,
+          coins: this.loot.coins,
+          gems: this.loot.gems,
+          lives: this.lives,
+          points: this.points,
+          bonus,
+          reward,
+          wallet: this.wallet,
+          level: this.level,
+          lastLevel: this.level >= 9,
+        }),
         1900,
       );
       return;
@@ -569,9 +695,22 @@ export class Game {
     if (this.lives <= 0) {
       this.state = 'over';
       this.brain.enabled = false;
+      // All five lives spent → the kingdom needs time to recover: 5-hour lockout.
+      Game.beginLockout();
       this.hud.announce('Game Over', { danger: true });
       this.sfx.lose();
-      setTimeout(() => this.hud.showResult({ win: false, coins: this.loot.coins, gems: this.loot.gems, lives: 0, points: this.points }), 1900);
+      setTimeout(
+        () =>
+          this.hud.showResult({
+            win: false,
+            coins: this.loot.coins,
+            gems: this.loot.gems,
+            lives: 0,
+            points: this.points,
+            level: this.level,
+          }),
+        1900,
+      );
       return;
     }
 

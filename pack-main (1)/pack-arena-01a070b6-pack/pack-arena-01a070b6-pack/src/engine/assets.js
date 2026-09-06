@@ -46,4 +46,22 @@ export class AssetLoader {
   loadAll(paths) {
     return Promise.all(paths.map((path) => this.load(path)));
   }
+
+  /** Loads a bitmap texture (for the war backdrop) once; caches the result. */
+  loadTexture(path) {
+    if (!this.textureCache) this.textureCache = new Map();
+    if (!this.textureCache.has(path)) {
+      const loader = new THREE.TextureLoader(this.manager).setPath(BASE_URL);
+      loader.setCrossOrigin('anonymous');
+      this.textureCache.set(
+        path,
+        loader.loadAsync(path).then((texture) => {
+          texture.colorSpace = THREE.SRGBColorSpace;
+          texture.anisotropy = 8;
+          return texture;
+        }),
+      );
+    }
+    return this.textureCache.get(path);
+  }
 }
