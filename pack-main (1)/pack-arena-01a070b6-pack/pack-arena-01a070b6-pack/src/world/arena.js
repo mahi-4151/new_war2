@@ -320,6 +320,29 @@ export class Arena {
     this.scene.add(banners);
   }
 
+  /**
+   * Wraps a wide war-scene image behind the battleground. The player can swap
+   * `public/assets/war-background.png` for their own art — the game just shows
+   * whatever image lives there. Falls back to the procedural sky if missing.
+   */
+  async buildBackdrop() {
+    try {
+      // ?v= token busts the browser cache so a replaced image always shows.
+      const texture = await this.loader.loadTexture('war-background.png?v=4');
+      const plane = new THREE.Mesh(
+        new THREE.PlaneGeometry(150, 62),
+        new THREE.MeshBasicMaterial({ map: texture, toneMapped: false, fog: false, depthWrite: false }),
+      );
+      plane.position.set(0, 8, -46);
+      plane.renderOrder = -1;
+      plane.frustumCulled = false;
+      this.scene.add(plane);
+      this.backdrop = plane;
+    } catch (err) {
+      // No image present — keep the procedural sky.
+    }
+  }
+
   /** Keeps the team markers and rim lights glued to the duellists. */
   trackFighters(playerX, enemyX, elapsed = 0) {
     const pulse = 1 + Math.sin(elapsed * 2.4) * 0.04;
